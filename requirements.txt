@@ -1,0 +1,4 @@
+markdown
+requests
+python-docx
+docx2pdf
