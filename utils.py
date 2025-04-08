@@ -1,7 +1,14 @@
-import os
-from docx import Document
-from docx2pdf import convert
+import re
+import smtplib
+from email import encoders
+from docx.shared import Pt
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
 from datetime import date, timedelta
+from email.mime.multipart import MIMEMultipart
+
 
 def count_weekdays(start_date, end_date):
     """Conta os dias úteis entre duas datas."""
@@ -31,16 +38,40 @@ def get_sprint_number(today):
     sprint_number = total_weekdays // 15
     return sprint_number
 
-def preencher_template(caminho_template, caminho_saida, variaveis):
-    doc = Document(caminho_template)
+def adicionar_bloco_codigo(doc, codigo, linguagem=""):
+    paragrafo = doc.add_paragraph()
+    run = paragrafo.add_run(codigo)
+    run.font.name = 'Courier New'
+    run.font.size = Pt(10)
+    r = run._element
+    r.rPr.rFonts.set(qn('w:eastAsia'), 'Courier New')
 
-    # Substitui variáveis em parágrafos normais
+    # Estilo visual (opcional)
+    paragrafo_format = paragrafo.paragraph_format
+    paragrafo_format.space_before = Pt(6)
+    paragrafo_format.space_after = Pt(6)
+
+    # Borda estilo "caixa de código"
+    p = paragrafo._element
+    pPr = p.get_or_add_pPr()
+    pBdr = OxmlElement('w:pBdr')
+    for side in ['top', 'left', 'bottom', 'right']:
+        border = OxmlElement(f'w:{side}')
+        border.set(qn('w:val'), 'single')
+        border.set(qn('w:sz'), '4')
+        border.set(qn('w:space'), '2')
+        border.set(qn('w:color'), 'auto')
+        pBdr.append(border)
+    pPr.append(pBdr)
+    
+def substituir_variaveis_em_documento(doc, variaveis):
+    # Substitui em parágrafos fora de tabela
     for paragrafo in doc.paragraphs:
         for chave, valor in variaveis.items():
             if f"{{{{{chave}}}}}" in paragrafo.text:
                 paragrafo.text = paragrafo.text.replace(f"{{{{{chave}}}}}", valor)
 
-    # Substitui variáveis dentro de tabelas
+    # Substitui dentro de tabelas
     for tabela in doc.tables:
         for linha in tabela.rows:
             for celula in linha.cells:
@@ -49,8 +80,68 @@ def preencher_template(caminho_template, caminho_saida, variaveis):
                         if f"{{{{{chave}}}}}" in paragrafo.text:
                             paragrafo.text = paragrafo.text.replace(f"{{{{{chave}}}}}", valor)
 
-    doc.save(caminho_saida)
+def inserir_resposta_llm(doc, texto):
+    # Regex para detectar blocos de código: ```linguagem\n(código)\n```
+    padrao = re.compile(r'```(\w+)?\n(.*?)\n```', re.DOTALL)
+    pos = 0
+
+    for match in padrao.finditer(texto):
+        inicio, fim = match.span()
+        linguagem = match.group(1) or ""
+        codigo = match.group(2)
+
+        # Texto antes do código
+        if inicio > pos:
+            trecho = texto[pos:inicio].strip()
+            for linha in trecho.splitlines():
+                if linha.strip():
+                    doc.add_paragraph(linha.strip())
+        # Adiciona o bloco de código formatado
+        adicionar_bloco_codigo(doc, codigo, linguagem)
+
+        pos = fim
+
+    # Texto depois do último bloco de código
+    if pos < len(texto):
+        restante = texto[pos:].strip()
+        for linha in restante.splitlines():
+            if linha.strip():
+                doc.add_paragraph(linha.strip())
+                
+def enviar_email(pdf, dia):
+    password = "ojbs qfgx euob kujr"
+    sender = "alexandre.tavares@kuaracapital.com"
+    # destination = ["manuel@kuaracapital.com", "kaue.figueiredo@kuaracapital.com"]
+    destination = "alexandre.j.tavares.jr@gmail.com"
     
-    convert(caminho_saida, caminho_saida.replace(".docx", ".pdf"))
+    subject = f"[INTERNO] ATA do dia {dia}"
+    body = f"""
+    Prezados, bom dia.
     
-    os.remove(caminho_saida)
+    Segue em anexo a ata das atividades desenvolvidas no dia {dia}.
+    
+    Fico à disposição para quaisquer esclarecimentos.
+    
+    Atenciosamente, Alexandre Tavares.
+    """
+    
+    msg = MIMEMultipart()
+    msg['From'] = sender
+    msg['To'] = ", ".join(destination) if isinstance(destination, list) else destination
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+    with open(pdf, 'rb') as anexo:
+        parte = MIMEBase('application', 'octet-stream')
+        parte.set_payload(anexo.read())
+        encoders.encode_base64(parte)
+        parte.add_header('Content-Disposition', f'attachment; filename="{pdf}"')
+        msg.attach(parte)
+        
+    try:
+        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+            server.starttls()
+            server.login(sender, password)
+            server.sendmail(sender, destination, msg.as_string())
+        print("Email enviado com sucesso!")
+    except Exception as e:
+        print(f"Erro ao enviar email: {e}")
