@@ -3,10 +3,12 @@ import smtplib
 from email import encoders
 from docx.shared import Pt
 from docx.oxml.ns import qn
+from docx.shared import Inches
 from docx.oxml import OxmlElement
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from datetime import date, timedelta
+from docx.enum.style import WD_STYLE_TYPE
 from email.mime.multipart import MIMEMultipart
 
 
@@ -64,6 +66,95 @@ def adicionar_bloco_codigo(doc, codigo, linguagem=""):
         pBdr.append(border)
     pPr.append(pBdr)
     
+def processar_imagem(doc, markdown_image):
+    # Regex melhorado para capturar casos incompletos
+    match = re.search(r'!\[([^\]]*)\]\(([^\)]+)\)', markdown_image)
+    if match:
+        try:
+            img_path = match.group(2).strip()
+            print(f"Tentando inserir imagem: {img_path}")
+            
+            # Adiciona a imagem com tamanho proporcional
+            doc.add_picture(img_path, width=Inches(4))  # 4 polegadas = ~10cm
+            
+            # Adiciona legenda se existir
+            if match.group(1).strip():
+                p = doc.add_paragraph(style='Caption')
+                p.add_run(f"Figura: {match.group(1).strip()}").italic = True
+                
+        except Exception as e:
+            print(f"Erro ao inserir imagem '{img_path}': {type(e).__name__} - {str(e)}")
+    
+def processar_linha_markdown(doc, line):
+    if 'Code' not in doc.styles:
+        code_style = doc.styles.add_style('Code', WD_STYLE_TYPE.CHARACTER)
+        code_style.font.name = 'Courier New'
+        code_style.font.size = Pt(10)
+    if 'Caption' not in doc.styles:
+        caption_style = doc.styles.add_style('Caption', WD_STYLE_TYPE.PARAGRAPH)
+        caption_style.font.name = 'Arial'
+        caption_style.font.size = Pt(10)
+        caption_style.font.italic = True
+        caption_style.paragraph_format.space_after = Pt(6)
+    
+    line = line.strip()
+    if not line:
+        return
+    line = line.strip()
+    if not line:
+        return
+
+    p = doc.add_paragraph()
+    
+    # Remove marcador de lista se existir
+    if line.startswith('- '):
+        line = line[2:]
+
+    # Processa elementos especiais em sequência
+    segments = re.split(r'(```|\*\*|\*|`|!\[)', line)
+    in_bold = False
+    in_italic = False
+    in_code = False
+    in_code_block = False
+    image_buffer = None
+
+    for seg in segments:
+        if seg == '**':
+            in_bold = not in_bold
+        elif seg == '*':
+            in_italic = not in_italic
+        elif seg == '`':
+            if not in_code_block:
+                in_code = not in_code
+        elif seg == '```':
+            in_code_block = not in_code_block
+        elif seg == '![':
+            image_buffer = seg  # Inicia o buffer de imagem
+        elif image_buffer is not None:
+            image_buffer += seg  # Acumula partes da imagem
+            
+            # Verifica se fechou com ')' e processa
+            if ')' in seg:
+                # Processa mesmo que incompleto
+                processar_imagem(doc, image_buffer)
+                image_buffer = None
+                p = doc.add_paragraph()  # Nova linha após imagem
+        else:
+            if seg:
+                run = p.add_run(seg)
+                
+                # Aplica formatação hierarquicamente
+                if in_code_block:
+                    run.font.name = 'Courier New'
+                    run.font.size = Pt(10)
+                elif in_code:
+                    run.font.name = 'Courier New'
+                    run.font.size = Pt(10)
+                    run.style = 'Code'
+                else:
+                    run.bold = in_bold
+                    run.italic = in_italic
+    
 def substituir_variaveis_em_documento(doc, variaveis):
     # Substitui em parágrafos fora de tabela
     for paragrafo in doc.paragraphs:
@@ -81,38 +172,31 @@ def substituir_variaveis_em_documento(doc, variaveis):
                             paragrafo.text = paragrafo.text.replace(f"{{{{{chave}}}}}", valor)
 
 def inserir_resposta_llm(doc, texto):
-    # Regex para detectar blocos de código: ```linguagem\n(código)\n```
-    padrao = re.compile(r'```(\w+)?\n(.*?)\n```', re.DOTALL)
+    # Primeiro processa blocos de código
+    padrao_bloco_codigo = re.compile(r'```(\w+)?\n(.*?)\n```', re.DOTALL)
     pos = 0
-
-    for match in padrao.finditer(texto):
-        inicio, fim = match.span()
-        linguagem = match.group(1) or ""
-        codigo = match.group(2)
-
-        # Texto antes do código
-        if inicio > pos:
-            trecho = texto[pos:inicio].strip()
-            for linha in trecho.splitlines():
-                if linha.strip():
-                    doc.add_paragraph(linha.strip())
-        # Adiciona o bloco de código formatado
-        adicionar_bloco_codigo(doc, codigo, linguagem)
-
-        pos = fim
-
-    # Texto depois do último bloco de código
-    if pos < len(texto):
-        restante = texto[pos:].strip()
-        for linha in restante.splitlines():
-            if linha.strip():
-                doc.add_paragraph(linha.strip())
+    
+    for match in padrao_bloco_codigo.finditer(texto):
+        # Processa texto antes do bloco
+        texto_anterior = texto[pos:match.start()].strip()
+        if texto_anterior:
+            for linha in texto_anterior.split('\n'):
+                processar_linha_markdown(doc, linha)
+        
+        # Adiciona bloco de código
+        adicionar_bloco_codigo(doc, match.group(2).strip(), match.group(1))
+        pos = match.end()
+    
+    # Processa texto após o último bloco
+    texto_restante = texto[pos:].strip()
+    if texto_restante:
+        for linha in texto_restante.split('\n'):
+            processar_linha_markdown(doc, linha)
                 
 def enviar_email(pdf, dia):
     password = "ojbs qfgx euob kujr"
     sender = "alexandre.tavares@kuaracapital.com"
-    # destination = ["manuel@kuaracapital.com", "kaue.figueiredo@kuaracapital.com"]
-    destination = "alexandre.j.tavares.jr@gmail.com"
+    destination = ["manuel@kuaracapital.com", "kaue.figueiredo@kuaracapital.com"]
     
     subject = f"[INTERNO] ATA do dia {dia}"
     body = f"""

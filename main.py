@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import date
 from docx import Document
 from ata import generate_ata
@@ -6,7 +7,7 @@ from docx2pdf import convert
 from modal import abrir_date_picker
 from utils import get_sprint_number, inserir_resposta_llm, substituir_variaveis_em_documento, enviar_email
 
-obsidian_path = r"C:\Users\Alexandre\Documents\Obsidian Vault\Kuará Capital\Sprints"
+obsidian_path = r"D:\Server\Obsidian Vault\Kuará Capital\Sprints"
 
 def main():
     print(f"Gerar ATA de hoje? ({date.today()})")
@@ -32,10 +33,19 @@ def main():
     with open(activity_file, "r", encoding="utf-8") as file:
         content = file.read()
 
-    # 2. Envia para a LLM e recebe o texto da ATA
     text = generate_ata(content, date_ata)
+    
+    padrao = re.compile(r'!\[\[(.*?)\]\]')
+    matches = padrao.findall(text)
+    if not matches:
+        padrao = re.compile(r'!\[(.*?)\]')
+        matches = padrao.findall(text)
+    for match in matches:
+        caminho = os.path.join(obsidian_path.split("Kuará Capital")[0], match)
+        if os.path.exists(caminho):
+            text = text.replace(f"![[{match}]]", f"![{match}]({caminho})")
+        
 
-    # 3. Abre o template Word
     template_file = "ATA.docx"
     doc = Document(template_file)
 
@@ -47,14 +57,12 @@ def main():
 
     substituir_variaveis_em_documento(doc, variaveis)
 
-    # 5. Encontra o marcador {{texto}}, remove, e insere o conteúdo da LLM formatado
     for par in doc.paragraphs:
         if "{{texto}}" in par.text:
             par.clear()
             inserir_resposta_llm(doc, text)
             break
-
-    # 6. Salva o arquivo final
+        
     output_docx = f"ATA_{date_ata.strftime('%d-%m-%Y')}.docx"
     doc.save(output_docx)
 
@@ -62,7 +70,7 @@ def main():
     convert(output_docx, output_docx.replace(".docx", ".pdf"))
     os.remove(output_docx)
     
-    enviar_email(output_docx.replace(".docx", ".pdf"), date_ata.strftime("%d/%m/%Y"))
+    # enviar_email(output_docx.replace(".docx", ".pdf"), date_ata.strftime("%d/%m/%Y"))
     
 if __name__ == "__main__":
     main()

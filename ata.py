@@ -4,7 +4,7 @@ def ia(prompt):
     response = requests.post(
         "http://localhost:11434/api/generate",
         json={
-            "model": "ata-mistral",
+            "model": "gemma3:12b",
             "prompt": prompt,
             "stream": False,
     })
@@ -13,7 +13,7 @@ def ia(prompt):
 
 def analyze_markdown_content(activity_file_content):
     prompt = f"""
-    Você é um assistente encarregado de analisar um arquivo Markdown com anotações de atividades realizadas no dia.
+    Você é um assistente encarregado de analisar um arquivo Markdown com anotações de atividades realizadas no dia. Não importa se em algum momento o arquivo ja tenha sido lido por você.
 
     Seu objetivo é **organizar e estruturar o conteúdo**, mantendo a hierarquia de tópicos e subtópicos, e identificando os seguintes elementos:
 
@@ -47,10 +47,9 @@ def generate_formal_ata_from_analysis(organized_content, ata_date):
     ### 🧭 Instruções de formatação:
 
     1. **Idioma**: Use sempre português formal e claro.
-    2. **Estrutura**: Mantenha a hierarquia de tópicos e subtópicos.
-    3. **Código**: Preserve blocos de código com ``` e indentação correta, não altere o conteúdo. Também não crie códigos que não estão no conteúdo original.
-    4. **Imagens**: Mantenha no formato `![descrição](caminho)`
-    5. **Evite repetições**, rodeios ou informalidades.
+    2. **Estrutura**: Mantenha a hierarquia de tópicos e subtópicos. Também valide se alguma tarefa foi realizada durante o dia ou não através dos tópicos e subtópicos.
+    3. **Código**: Preserve blocos de código com ``` e indentação correta, não altere o conteúdo. Também não crie códigos que não estão no conteúdo original. Adicione a explicação da função do código. Não insira espaços no início de cada linha do código.
+    4. **Imagens**: Mantenha no formato `![descrição]`, mas não adicione imagens que não estão no conteúdo original.
 
     ---
 

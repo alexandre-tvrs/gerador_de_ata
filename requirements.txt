@@ -3,3 +3,4 @@ requests
 python-docx
 docx2pdf
 tkcalendar
+python-docx
