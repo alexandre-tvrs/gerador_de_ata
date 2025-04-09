@@ -70,7 +70,7 @@ def main():
     convert(output_docx, output_docx.replace(".docx", ".pdf"))
     os.remove(output_docx)
     
-    # enviar_email(output_docx.replace(".docx", ".pdf"), date_ata.strftime("%d/%m/%Y"))
+    enviar_email(output_docx.replace(".docx", ".pdf"), date_ata.strftime("%d/%m/%Y"))
     
 if __name__ == "__main__":
     main()
